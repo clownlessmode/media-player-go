@@ -665,13 +665,15 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 	audioDevice := getEnv("MPLAYER_AUDIO_DEVICE", "plughw:1,0")
 
 	if videoPlayerCmd == "mpv" {
-		// mpv: --vo=x11 или --vo=drm (на SBC без X11), чтение с stdin
+		// mpv: gpu (OpenGL) быстрее x11; на SBC без X11 — drm
 		mpvVo := vo
-		if vo == "fbdev2" {
-			mpvVo = "drm" // mpv не имеет fbdev2, drm типичен для Orange Pi / RPi
+		if vo == "x11" {
+			mpvVo = "gpu" // x11 legacy VO дропает кадры, gpu — аппаратное ускорение
+		} else if vo == "fbdev2" {
+			mpvVo = "drm"
 		}
 		args := []string{
-			"-", // stdin
+			"-",
 			"--vo=" + mpvVo,
 			"--ao=alsa",
 			"--vf=scale=1280:720",

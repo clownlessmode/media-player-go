@@ -145,6 +145,23 @@ disable_screensaver_and_dpms() {
 	if command -v xhost &>/dev/null; then
 		sudo -u "$desk_user" DISPLAY="$disp" xhost +SI:localuser:root 2>/dev/null && echo "[OK] xhost: root разрешён доступ к X"
 	fi
+	# экран 1280x720 (xrandr)
+	if command -v xrandr &>/dev/null; then
+		outname=""
+		while read -r line; do
+			if [[ "$line" == *" connected"* ]]; then
+				outname=$(echo "$line" | awk '{print $1}')
+				break
+			fi
+		done < <(sudo -u "$desk_user" DISPLAY="$disp" xrandr -q 2>/dev/null)
+		if [ -n "$outname" ]; then
+			if sudo -u "$desk_user" DISPLAY="$disp" xrandr --output "$outname" --mode 1280x720 2>/dev/null || \
+			   sudo -u "$desk_user" DISPLAY="$disp" xrandr --output "$outname" --mode 1280x720_60.00 2>/dev/null || \
+			   sudo -u "$desk_user" DISPLAY="$disp" xrandr --output "$outname" --mode 1280x720_60 2>/dev/null; then
+				echo "[OK] xrandr: разрешение 1280x720"
+			fi
+		fi
+	fi
 	# консоль: не гасить (на всякий случай; ошибки не выводим)
 	( [ -w /sys/module/kernel/parameters/consoleblank ] && echo 0 > /sys/module/kernel/parameters/consoleblank ) 2>/dev/null && echo "[OK] consoleblank=0" || true
 	[ -w /dev/tty1 ] && printf '\033[9;0]' > /dev/tty1 2>/dev/null || true
