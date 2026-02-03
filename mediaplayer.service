@@ -1,0 +1,30 @@
+# Автозапуск медиа-плеера при загрузке системы (Armbian / systemd).
+# Установка:
+#   sudo cp mediaplayer.service /etc/systemd/system/
+#   sudo sed -i 's|/root/media-player-go|/home/ВАШ_ПОЛЬЗОВАТЕЛЬ/media-player-go|' /etc/systemd/system/mediaplayer.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable mediaplayer
+#   sudo systemctl start mediaplayer
+#
+# Логи: journalctl -u mediaplayer -f
+
+[Unit]
+Description=Media player (Orange Pi)
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Путь к бинарнику и рабочая директория (поменяйте на свой, если не root)
+WorkingDirectory=/root/media-player-go
+ExecStart=/root/media-player-go/mediaplayer-linux-arm64
+Restart=on-failure
+RestartSec=10
+# Вывод на экран X11 (LightDM/XFCE)
+Environment=DISPLAY=:0
+# Опционально: сервер и папка медиа
+# Environment=SERVER_URL=http://192.168.0.4:3000
+# Environment=MEDIA_DIR=/root/media
+
+[Install]
+WantedBy=multi-user.target

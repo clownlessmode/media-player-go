@@ -49,11 +49,25 @@ sudo apt install mplayer ffmpeg
 
 Воспроизведение идёт через **ffmpeg concat → mplayer** (один поток без пауз между роликами). Если на переходе между двумя роликами экран кратко «зависает», скорее всего второй ролик не начинается с ключевого кадра (I-frame). Перекодируй его так, чтобы первый кадр был ключевым, например: `ffmpeg -i input.mp4 -c copy -force_key_frames "expr:eq(n,0)" output.mp4`.
 
-Запуск (например, через systemd при включении):
+При запуске плеер проверяет: наличие **mplayer** и **ffmpeg** (без них — выход), наличие звуковых карт (предупреждение при отсутствии), при X11 выставляет разрешение **1280x720**.
+
+**Автозапуск при загрузке (один раз ввести пароль sudo):**
+
+На Orange Pi положите в одну папку бинарник `mediaplayer-linux-arm64`, файлы `mediaplayer.service` и `install-service.sh`. Затем выполните один раз:
+
+```bash
+cd ~/media-player-go   # или /root/media-player-go
+chmod +x install-service.sh
+sudo ./install-service.sh
+```
+
+Скрипт подставит текущий путь в unit, включит и запустит сервис. После этого при каждой загрузке плеер будет стартовать автоматически, без ввода пароля.
+
+Ручной запуск:
 
 ```bash
 export SERVER_URL=https://your-admin.example.com
-./mediaplayer
+./mediaplayer-linux-arm64
 ```
 
 ## API сервера (ожидаемое)

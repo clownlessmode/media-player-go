@@ -65,6 +65,8 @@ func main() {
 	mac := macAddressString()
 	fmt.Printf("[mediaplayer] запуск, MAC=%s, SERVER=%s, MEDIA_DIR=%s\n", mac, cfg.ServerURL, cfg.MediaDir)
 
+	runStartupChecks()
+
 	// 1. Чек-ин каждые 10 минут (при 401 не выходим, продолжаем ждать)
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
@@ -150,7 +152,8 @@ func main() {
 			return
 		}
 		fmt.Printf("[mediaplayer] запускаю воспроизведение (ffmpeg concat → mplayer, vo=%s)\n", mplayerVideoOutput())
-		clearDisplayBlack() // чёрный до первого кадра
+		setDisplayResolution1280x720() // 1280x720 перед воспроизведением (X11)
+		clearDisplayBlack()            // чёрный до первого кадра
 		ctx, cancel := context.WithCancel(context.Background())
 		playCancel = cancel
 		go func() {
@@ -377,6 +380,81 @@ func downloadFile(url, path string) error {
 	defer f.Close()
 	_, err = io.Copy(f, resp.Body)
 	return err
+}
+
+// runStartupChecks проверяет зависимости и окружение перед работой; при отсутствии mplayer/ffmpeg — выход.
+func runStartupChecks() {
+	// 1) mplayer и ffmpeg обязательны
+	if _, err := exec.LookPath("mplayer"); err != nil {
+		fmt.Fprintf(os.Stderr, "[mediaplayer] ошибка: mplayer не найден. Установите: apt install mplayer\n")
+		os.Exit(1)
+	}
+	fmt.Println("[mediaplayer] проверка: mplayer найден")
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		fmt.Fprintf(os.Stderr, "[mediaplayer] ошибка: ffmpeg не найден. Установите: apt install ffmpeg\n")
+		os.Exit(1)
+	}
+	fmt.Println("[mediaplayer] проверка: ffmpeg найден")
+
+	// 2) аудио: есть ли хотя бы одна звуковая карта
+	if data, err := os.ReadFile("/proc/asound/cards"); err != nil || strings.TrimSpace(string(data)) == "" || strings.Contains(string(data), "no soundcards") {
+		fmt.Fprintln(os.Stderr, "[mediaplayer] предупреждение: звуковые карты не найдены (aplay -l). Звук может не работать.")
+	} else {
+		fmt.Println("[mediaplayer] проверка: звуковые карты обнаружены")
+	}
+
+	// 3) экран 1280x720: при X11 выставляем разрешение сразу
+	if mplayerDisplay() != "" {
+		setDisplayResolution1280x720()
+	} else {
+		fmt.Println("[mediaplayer] проверка: X11 не активен, вывод будет в fbdev2 (разрешение из загрузки)")
+	}
+}
+
+// setDisplayResolution1280x720 переключает экран в 1280x720 перед воспроизведением (X11 через xrandr).
+func setDisplayResolution1280x720() {
+	disp := mplayerDisplay()
+	if disp == "" {
+		return
+	}
+	env := os.Environ()
+	if os.Getenv("DISPLAY") == "" {
+		var filtered []string
+		for _, e := range env {
+			if !strings.HasPrefix(e, "DISPLAY=") {
+				filtered = append(filtered, e)
+			}
+		}
+		env = append(filtered, "DISPLAY="+disp)
+	}
+	// Узнаём имя подключённого вывода (HDMI-1, HDMI-A-1 и т.п.)
+	cmd := exec.Command("xrandr", "-q")
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	var outputName string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, " connected") {
+			fields := strings.Fields(line)
+			if len(fields) >= 1 {
+				outputName = fields[0]
+				break
+			}
+		}
+	}
+	if outputName == "" {
+		return
+	}
+	tryMode := func(mode string) bool {
+		cmd := exec.Command("xrandr", "--output", outputName, "--mode", mode)
+		cmd.Env = env
+		return cmd.Run() == nil
+	}
+	if tryMode("1280x720") || tryMode("1280x720_60.00") || tryMode("1280x720_60") {
+		fmt.Println("[mediaplayer] разрешение экрана: 1280x720")
+	}
 }
 
 // clearDisplayBlack заливает экран чёрным, чтобы между остановкой и запуском mplayer не мелькала консоль.
