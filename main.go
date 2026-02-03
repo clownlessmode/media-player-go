@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -595,11 +596,26 @@ func xauthPath() string {
 			return p
 		}
 	}
+	// Классические пути
 	for _, name := range []string{os.Getenv("SUDO_USER"), "user"} {
 		if name == "" {
 			continue
 		}
 		p := "/home/" + name + "/.Xauthority"
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Владелец сокета X0 — его /run/user/UID/.Xauthority (systemd logind)
+	var st syscall.Stat_t
+	if err := syscall.Stat("/tmp/.X11-unix/X0", &st); err == nil {
+		p := filepath.Join("/run/user", fmt.Sprint(st.Uid), ".Xauthority")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// LightDM и др.
+	for _, p := range []string{"/var/run/lightdm/.Xauthority", "/var/lib/gdm/.Xauthority"} {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}

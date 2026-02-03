@@ -141,6 +141,10 @@ disable_screensaver_and_dpms() {
 	if command -v xset &>/dev/null; then
 		sudo -u "$desk_user" DISPLAY="$disp" xset s off -dpms s noblank 2>/dev/null && echo "[OK] xset: экран не будет гаснуть (DPMS/blank off)"
 	fi
+	# разрешить root подключаться к X (чтобы mediaplayer из-под root мог выводить на экран)
+	if command -v xhost &>/dev/null; then
+		sudo -u "$desk_user" DISPLAY="$disp" xhost +SI:localuser:root 2>/dev/null && echo "[OK] xhost: root разрешён доступ к X"
+	fi
 	# консоль: не гасить (на всякий случай; ошибки не выводим)
 	( [ -w /sys/module/kernel/parameters/consoleblank ] && echo 0 > /sys/module/kernel/parameters/consoleblank ) 2>/dev/null && echo "[OK] consoleblank=0" || true
 	[ -w /dev/tty1 ] && printf '\033[9;0]' > /dev/tty1 2>/dev/null || true
