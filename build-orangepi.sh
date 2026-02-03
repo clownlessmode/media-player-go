@@ -10,16 +10,16 @@ cd "$(dirname "$0")"
 
 ARCH="${1:-arm64}"
 VERSION="${VERSION:-dev}"
-BINARY="mediaplayer"
+BINARY="setup"
 
 case "$ARCH" in
   arm64|aarch64)
-    GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=$VERSION" -o "${BINARY}-linux-arm64" .
-    echo "Собран: ${BINARY}-linux-arm64 (linux/arm64)"
+    GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=$VERSION" -o "${BINARY}" .
+    echo "Собран: ${BINARY}"
     ;;
   arm|armv7|armhf)
-    GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-X main.Version=$VERSION" -o "${BINARY}-linux-arm" .
-    echo "Собран: ${BINARY}-linux-arm (linux/arm/v7)"
+    GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "-X main.Version=$VERSION" -o "${BINARY}" .
+    echo "Собран: ${BINARY}"
     ;;
   *)
     echo "Неизвестная архитектура: $ARCH"
