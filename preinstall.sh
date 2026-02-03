@@ -22,12 +22,16 @@ detect_pkg_manager() {
 		PKG_MGR="yum"
 		PKG_UPDATE="yum check-update -q || true"
 		PKG_INSTALL="yum install -y"
+	elif command -v pacman &>/dev/null; then
+		PKG_MGR="pacman"
+		PKG_UPDATE="pacman -Sy --noconfirm"
+		PKG_INSTALL="pacman -S --noconfirm"
 	elif command -v apk &>/dev/null; then
 		PKG_MGR="apk"
 		PKG_UPDATE="apk update"
 		PKG_INSTALL="apk add"
 	else
-		echo "Не найден подходящий менеджер пакетов (apt/dnf/yum/apk)."
+		echo "Не найден подходящий менеджер пакетов (apt/dnf/yum/pacman/apk)."
 		exit 1
 	fi
 }
@@ -46,6 +50,10 @@ ensure_installed() {
 			$PKG_UPDATE
 			$PKG_INSTALL $pkg
 			;;
+		pacman)
+			$PKG_UPDATE
+			$PKG_INSTALL $pkg
+			;;
 		apk)
 			$PKG_INSTALL $pkg
 			;;
@@ -55,6 +63,44 @@ ensure_installed() {
 			;;
 	esac
 	echo "[OK] $name установлен."
+}
+
+# --- Установка пакета при отсутствии (при ошибке — предупреждение, скрипт не падает) ---
+ensure_installed_optional() {
+	local name="$1"
+	local pkg="${2:-$1}"
+	if command -v "$name" &>/dev/null; then
+		echo "[OK] $name уже установлен: $(command -v "$name")"
+		return 0
+	fi
+	echo "[...] Устанавливаю $name (опционально)..."
+	set +e
+	case "$PKG_MGR" in
+		apt|dnf|yum)
+			$PKG_UPDATE
+			$PKG_INSTALL $pkg
+			;;
+		pacman)
+			$PKG_UPDATE
+			$PKG_INSTALL $pkg
+			;;
+		apk)
+			$PKG_INSTALL $pkg
+			;;
+		*)
+			set -e
+			echo "Установите $name вручную при необходимости."
+			return 1
+			;;
+	esac
+	local ret=$?
+	set -e
+	if [ $ret -ne 0 ]; then
+		echo "[!] Не удалось установить $name (возможен конфликт зависимостей). Продолжаю без него."
+		return 1
+	fi
+	echo "[OK] $name установлен."
+	return 0
 }
 
 # --- Скачивание файла ---
@@ -77,7 +123,7 @@ detect_pkg_manager
 
 ensure_installed "git" "git"
 ensure_installed "ffmpeg" "ffmpeg"
-ensure_installed "mplayer" "mplayer"
+ensure_installed_optional "mplayer" "mplayer" || true
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"

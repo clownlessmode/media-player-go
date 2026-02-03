@@ -21,6 +21,9 @@ import (
 // Версия (подставляется при сборке: -ldflags "-X main.Version=...")
 var Version = "dev"
 
+// videoPlayerCmd — имя плеера после runStartupChecks: "mplayer" или "mpv"
+var videoPlayerCmd string
+
 // HTTP-клиент без проверки TLS (для загрузки с любых источников).
 var httpClient = &http.Client{
 	Transport: &http.Transport{
@@ -151,7 +154,7 @@ func main() {
 			fmt.Println("[mediaplayer] ни одного файла не загрузилось, воспроизведение не запускаю")
 			return
 		}
-		fmt.Printf("[mediaplayer] запускаю воспроизведение (ffmpeg concat → mplayer, vo=%s)\n", mplayerVideoOutput())
+		fmt.Printf("[mediaplayer] запускаю воспроизведение (ffmpeg concat → %s, vo=%s)\n", videoPlayerCmd, mplayerVideoOutput())
 		setDisplayResolution1280x720() // 1280x720 перед воспроизведением (X11)
 		clearDisplayBlack()            // чёрный до первого кадра
 		ctx, cancel := context.WithCancel(context.Background())
@@ -382,16 +385,25 @@ func downloadFile(url, path string) error {
 	return err
 }
 
-// runStartupChecks проверяет зависимости и окружение перед работой; при отсутствии mplayer/ffmpeg — выход.
+// runStartupChecks проверяет зависимости и окружение перед работой; при отсутствии mplayer/mpv и ffmpeg — выход.
 func runStartupChecks() {
-	// 1) mplayer и ffmpeg обязательны
-	if _, err := exec.LookPath("mplayer"); err != nil {
-		fmt.Fprintf(os.Stderr, "[mediaplayer] ошибка: mplayer не найден. Установите: apt install mplayer\n")
+	// 1) Нужен хотя бы один плеер (mplayer или mpv) и ffmpeg
+	videoPlayerCmd = ""
+	if _, err := exec.LookPath("mplayer"); err == nil {
+		videoPlayerCmd = "mplayer"
+	}
+	if videoPlayerCmd == "" {
+		if _, err := exec.LookPath("mpv"); err == nil {
+			videoPlayerCmd = "mpv"
+		}
+	}
+	if videoPlayerCmd == "" {
+		fmt.Fprintln(os.Stderr, "[mediaplayer] ошибка: не найден mplayer или mpv. Установите: apt install mplayer  или  pacman -S mpv")
 		os.Exit(1)
 	}
-	fmt.Println("[mediaplayer] проверка: mplayer найден")
+	fmt.Printf("[mediaplayer] проверка: %s найден\n", videoPlayerCmd)
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		fmt.Fprintf(os.Stderr, "[mediaplayer] ошибка: ffmpeg не найден. Установите: apt install ffmpeg\n")
+		fmt.Fprintln(os.Stderr, "[mediaplayer] ошибка: ffmpeg не найден. Установите: apt install ffmpeg  или  pacman -S ffmpeg")
 		os.Exit(1)
 	}
 	fmt.Println("[mediaplayer] проверка: ffmpeg найден")
@@ -613,11 +625,49 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 		fmt.Fprintf(os.Stderr, "ffmpeg start: %v\n", err)
 		return nil, nil
 	}
-	// Видеовыход: в графической среде (десктоп) — x11, иначе fbdev2 (консоль/без дисплея)
+	// Видеовыход: в графической среде (десктоп) — x11, иначе fbdev2/drm (консоль/без дисплея)
 	vo := mplayerVideoOutput()
-	// Звук: явно ALSA-устройство (Pulse/ALSA default часто не работают на SBC). По умолчанию plughw:1,0 (часто HDMI).
 	audioDevice := getEnv("MPLAYER_AUDIO_DEVICE", "plughw:1,0")
-	// Большой кэш: при переходе между файлами пайп может кратко пустеть — кэш сглаживает зависание
+
+	if videoPlayerCmd == "mpv" {
+		// mpv: --vo=x11 или --vo=drm (на SBC без X11), чтение с stdin
+		mpvVo := vo
+		if vo == "fbdev2" {
+			mpvVo = "drm" // mpv не имеет fbdev2, drm типичен для Orange Pi / RPi
+		}
+		args := []string{
+			"-", // stdin
+			"--vo=" + mpvVo,
+			"--ao=alsa", "--alsa-device=" + audioDevice,
+			"--vf=scale=1280:720",
+			"--cache=yes", "--demuxer-max-bytes=150M",
+		}
+		if vo == "x11" {
+			args = append(args, "--fs")
+		}
+		mplayer = exec.Command("mpv", args...)
+		mplayer.Stdin = pipe
+		mplayer.Stdout = os.Stdout
+		mplayer.Stderr = os.Stderr
+		if vo == "x11" && mplayerDisplay() != "" && os.Getenv("DISPLAY") == "" {
+			env := os.Environ()
+			var filtered []string
+			for _, e := range env {
+				if !strings.HasPrefix(e, "DISPLAY=") {
+					filtered = append(filtered, e)
+				}
+			}
+			mplayer.Env = append(filtered, "DISPLAY="+mplayerDisplay())
+		}
+		if err := mplayer.Start(); err != nil {
+			_ = ffmpeg.Process.Kill()
+			fmt.Fprintf(os.Stderr, "mpv start: %v\n", err)
+			return nil, nil
+		}
+		return ffmpeg, mplayer
+	}
+
+	// mplayer
 	args := []string{
 		"-ao", "alsa:device=" + audioDevice,
 		"-vo", vo,
@@ -626,18 +676,16 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 		"-cache", "32768",
 	}
 	if vo == "x11" {
-		args = append(args, "-fs") // полноэкран в окне X11
+		args = append(args, "-fs")
 	}
 	args = append(args, "-")
 	mplayer = exec.Command("mplayer", args...)
 	mplayer.Stdin = pipe
 	mplayer.Stdout = os.Stdout
 	mplayer.Stderr = os.Stderr
-	// При выводе в X11 и пустом DISPLAY (SSH/консоль) передаём mplayer DISPLAY=:0
 	if vo == "x11" {
 		if disp := mplayerDisplay(); disp != "" && os.Getenv("DISPLAY") == "" {
 			env := os.Environ()
-			// Убираем пустой DISPLAY из окружения, добавляем DISPLAY=:0
 			var filtered []string
 			for _, e := range env {
 				if !strings.HasPrefix(e, "DISPLAY=") {
