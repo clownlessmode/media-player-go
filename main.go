@@ -471,6 +471,7 @@ func cleanupByIDs(dir string, keepIDs map[string]bool) {
 }
 
 // mplayerVideoOutput выбирает вывод видео: в графической среде (десктоп) — x11, иначе fbdev2.
+// Если DISPLAY пустой (запуск из SSH/консоли), но X11 запущен (LightDM/XFCE), используем :0.
 // Переменная MPLAYER_VO переопределяет выбор (например MPLAYER_VO=x11 или MPLAYER_VO=fbdev2).
 func mplayerVideoOutput() string {
 	if v := os.Getenv("MPLAYER_VO"); v != "" {
@@ -479,7 +480,22 @@ func mplayerVideoOutput() string {
 	if os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" {
 		return "x11"
 	}
+	// Запуск из SSH/консоли без DISPLAY — если X слушает на :0, выводим туда
+	if _, err := os.Stat("/tmp/.X11-unix/X0"); err == nil {
+		return "x11"
+	}
 	return "fbdev2"
+}
+
+// mplayerDisplay возвращает DISPLAY для процесса mplayer (при vo=x11). Если в окружении пусто — :0.
+func mplayerDisplay() string {
+	if d := os.Getenv("DISPLAY"); d != "" {
+		return d
+	}
+	if _, err := os.Stat("/tmp/.X11-unix/X0"); err == nil {
+		return ":0"
+	}
+	return ""
 }
 
 // runConcatPlayback запускает ffmpeg concat (бесконечный цикл по файлам) в пайп в mplayer.
@@ -539,6 +555,20 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 	mplayer.Stdin = pipe
 	mplayer.Stdout = os.Stdout
 	mplayer.Stderr = os.Stderr
+	// При выводе в X11 и пустом DISPLAY (SSH/консоль) передаём mplayer DISPLAY=:0
+	if vo == "x11" {
+		if disp := mplayerDisplay(); disp != "" && os.Getenv("DISPLAY") == "" {
+			env := os.Environ()
+			// Убираем пустой DISPLAY из окружения, добавляем DISPLAY=:0
+			var filtered []string
+			for _, e := range env {
+				if !strings.HasPrefix(e, "DISPLAY=") {
+					filtered = append(filtered, e)
+				}
+			}
+			mplayer.Env = append(filtered, "DISPLAY="+disp)
+		}
+	}
 	if err := mplayer.Start(); err != nil {
 		_ = ffmpeg.Process.Kill()
 		fmt.Fprintf(os.Stderr, "mplayer start: %v\n", err)
