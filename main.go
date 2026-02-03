@@ -665,11 +665,9 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 	audioDevice := getEnv("MPLAYER_AUDIO_DEVICE", "plughw:1,0")
 
 	if videoPlayerCmd == "mpv" {
-		// mpv: gpu (OpenGL) быстрее x11; на SBC без X11 — drm
+		// mpv: x11 (gpu/drm при запуске от root часто дают Permission denied / DRM busy)
 		mpvVo := vo
-		if vo == "x11" {
-			mpvVo = "gpu" // x11 legacy VO дропает кадры, gpu — аппаратное ускорение
-		} else if vo == "fbdev2" {
+		if vo == "fbdev2" {
 			mpvVo = "drm"
 		}
 		args := []string{
