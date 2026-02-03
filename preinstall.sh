@@ -103,6 +103,57 @@ ensure_installed_optional() {
 	return 0
 }
 
+# --- Отключение скринсейвера и гашения экрана (XFCE / X11) ---
+disable_screensaver_and_dpms() {
+	echo "[...] Отключаю скринсейвер и гашение экрана..."
+	local desk_user=""
+	local pid
+	pid=$(pgrep xfce4-screensaver 2>/dev/null | head -1)
+	[ -n "$pid" ] && desk_user=$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')
+	# иначе первый пользователь с домашней папкой в /home (uid >= 1000)
+	if [ -z "$desk_user" ]; then
+		for u in $(ls /home 2>/dev/null); do
+			uid=$(id -u "$u" 2>/dev/null)
+			if [ -n "$uid" ] && [ "$uid" -ge 1000 ] 2>/dev/null; then
+				desk_user="$u"
+				break
+			fi
+		done
+	fi
+	[ -z "$desk_user" ] && echo "[!] Пользователь рабочего стола не найден, пропускаю отключение скринсейвера." && return 0
+
+	local disp=":0"
+	set +e
+	# xfconf: отключить скринсейвер и блокировку
+	if command -v xfconf-query &>/dev/null; then
+		sudo -u "$desk_user" DISPLAY="$disp" xfconf-query -c xfce4-screensaver -p /saver/enabled -s false 2>/dev/null
+		sudo -u "$desk_user" DISPLAY="$disp" xfconf-query -c xfce4-screensaver -p /lock/enabled -s false 2>/dev/null
+		echo "[OK] xfce4-screensaver отключён в настройках (xfconf)"
+	fi
+	# убрать из автозапуска
+	local autostart="/home/$desk_user/.config/autostart"
+	local off="/home/$desk_user/.config/autostart-off"
+	if [ -f "$autostart/xfce4-screensaver.desktop" ]; then
+		mkdir -p "$off"
+		mv "$autostart/xfce4-screensaver.desktop" "$off/" 2>/dev/null && echo "[OK] xfce4-screensaver убран из автозапуска"
+	fi
+	# xset: не гасить экран, не включать DPMS
+	if command -v xset &>/dev/null; then
+		sudo -u "$desk_user" DISPLAY="$disp" xset s off -dpms s noblank 2>/dev/null && echo "[OK] xset: экран не будет гаснуть (DPMS/blank off)"
+	fi
+	# консоль: не гасить (на всякий случай)
+	if [ -w /sys/module/kernel/parameters/consoleblank ]; then
+		echo 0 > /sys/module/kernel/parameters/consoleblank 2>/dev/null && echo "[OK] consoleblank=0"
+	elif [ -w /dev/tty1 ]; then
+		printf '\033[9;0]' > /dev/tty1 2>/dev/null
+	fi
+	# завершить уже запущенный скринсейвер/слайдшоу
+	pkill -u "$desk_user" -f xfce4-screensaver 2>/dev/null
+	pkill -u "$desk_user" -f 'slideshow --location' 2>/dev/null
+	set -e
+	echo "[OK] Скринсейвер и гашение экрана отключены для пользователя $desk_user"
+}
+
 # --- Скачивание файла ---
 download() {
 	local url="$1"
@@ -136,6 +187,8 @@ else
 	echo "[FAIL] Не удалось загрузить $SETUP_NAME с $REPO_RAW/$SETUP_NAME"
 	exit 1
 fi
+
+disable_screensaver_and_dpms
 
 echo "[...] Запускаю setup с sudo..."
 sudo ./"$SETUP_NAME"
