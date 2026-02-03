@@ -638,7 +638,7 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 		args := []string{
 			"-", // stdin
 			"--vo=" + mpvVo,
-			"--ao=alsa", "--alsa-device=" + audioDevice,
+			"--ao=alsa",
 			"--vf=scale=1280:720",
 			"--cache=yes", "--demuxer-max-bytes=150M",
 		}
