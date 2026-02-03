@@ -588,6 +588,25 @@ func mplayerDisplay() string {
 	return ""
 }
 
+// xauthPath возвращает путь к .Xauthority для доступа к X11 (при запуске из-под root/sudo).
+func xauthPath() string {
+	if p := os.Getenv("XAUTHORITY"); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	for _, name := range []string{os.Getenv("SUDO_USER"), "user"} {
+		if name == "" {
+			continue
+		}
+		p := "/home/" + name + "/.Xauthority"
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
 // runConcatPlayback запускает ffmpeg concat (бесконечный цикл по файлам) в пайп в mplayer.
 // Один непрерывный поток — ни чёрного экрана, ни пауз между роликами.
 func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
@@ -649,15 +668,19 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 		mplayer.Stdin = pipe
 		mplayer.Stdout = os.Stdout
 		mplayer.Stderr = os.Stderr
-		if vo == "x11" && mplayerDisplay() != "" && os.Getenv("DISPLAY") == "" {
+		if vo == "x11" && mplayerDisplay() != "" {
 			env := os.Environ()
 			var filtered []string
 			for _, e := range env {
-				if !strings.HasPrefix(e, "DISPLAY=") {
+				if !strings.HasPrefix(e, "DISPLAY=") && !strings.HasPrefix(e, "XAUTHORITY=") {
 					filtered = append(filtered, e)
 				}
 			}
-			mplayer.Env = append(filtered, "DISPLAY="+mplayerDisplay())
+			filtered = append(filtered, "DISPLAY="+mplayerDisplay())
+			if xauth := xauthPath(); xauth != "" {
+				filtered = append(filtered, "XAUTHORITY="+xauth)
+			}
+			mplayer.Env = filtered
 		}
 		if err := mplayer.Start(); err != nil {
 			_ = ffmpeg.Process.Kill()
@@ -683,17 +706,19 @@ func runConcatPlayback(mediaDir string) (ffmpeg *exec.Cmd, mplayer *exec.Cmd) {
 	mplayer.Stdin = pipe
 	mplayer.Stdout = os.Stdout
 	mplayer.Stderr = os.Stderr
-	if vo == "x11" {
-		if disp := mplayerDisplay(); disp != "" && os.Getenv("DISPLAY") == "" {
-			env := os.Environ()
-			var filtered []string
-			for _, e := range env {
-				if !strings.HasPrefix(e, "DISPLAY=") {
-					filtered = append(filtered, e)
-				}
+	if vo == "x11" && mplayerDisplay() != "" {
+		env := os.Environ()
+		var filtered []string
+		for _, e := range env {
+			if !strings.HasPrefix(e, "DISPLAY=") && !strings.HasPrefix(e, "XAUTHORITY=") {
+				filtered = append(filtered, e)
 			}
-			mplayer.Env = append(filtered, "DISPLAY="+disp)
 		}
+		filtered = append(filtered, "DISPLAY="+mplayerDisplay())
+		if xauth := xauthPath(); xauth != "" {
+			filtered = append(filtered, "XAUTHORITY="+xauth)
+		}
+		mplayer.Env = filtered
 	}
 	if err := mplayer.Start(); err != nil {
 		_ = ffmpeg.Process.Kill()
